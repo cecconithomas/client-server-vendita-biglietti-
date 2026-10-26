@@ -5,32 +5,25 @@ import java.net.*;
 import java.util.*;
 
 public class Server {
-    private static final Map<String, Integer> disponibilita = new HashMap<>();
-    private static final Set<String> usernamesConnessi = new HashSet<>();
+    public static Map<String, Integer> disponibilita = new HashMap<>();
+    public static Set<String> usernamesConnessi = new HashSet<>();
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         disponibilita.put("Gold", 10);
         disponibilita.put("Pit", 30);
         disponibilita.put("Parterre", 60);
 
-        int porta = 3000;
-        try (ServerSocket serverSocket = new ServerSocket(porta)) {
-            System.out.println("Server avviato sulla porta " + porta + "...");
+        ServerSocket serverSocket = new ServerSocket(3000);
+        System.out.println("Server avviato sulla porta 3000...");
 
-            while (true) {
-                Socket socket = serverSocket.accept();
-                new ClientHandler(socket).start();
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
+        while (true) {
+            Socket socket = serverSocket.accept();
+            new ClientHandler(socket).start();
         }
     }
 
     private static class ClientHandler extends Thread {
         private Socket socket;
-        private BufferedReader in;
-        private PrintWriter out;
-        private String username;
 
         public ClientHandler(Socket socket) {
             this.socket = socket;
@@ -39,112 +32,71 @@ public class Server {
         @Override
         public void run() {
             try {
-                in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                out = new PrintWriter(socket.getOutputStream(), true);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
 
                 out.println("WELCOME");
-
-                boolean loggedIn = false;
+                String username = null;
                 String linea;
 
                 while ((linea = in.readLine()) != null) {
                     linea = linea.trim();
-                    if (linea.isEmpty()) continue;
 
-                    String[] parti = linea.split(" ", 2);
-                    String comando = parti[0].toUpperCase();
-
-                    if (!loggedIn) {
-                        if (comando.equals("LOGIN")) {
-                            if (parti.length < 2 || parti[1].trim().isEmpty()) {
-                                out.println("ERR SYNTAX");
-                                continue;
-                            }
-                            String tentativoUser = parti[1].trim();
+                    if (username == null) {
+                        if (linea.startsWith("LOGIN ")) {
+                            String tentativo = linea.substring(6).trim();
                             synchronized (usernamesConnessi) {
-                                if (usernamesConnessi.contains(tentativoUser)) {
+                                if (usernamesConnessi.contains(tentativo)) {
                                     out.println("ERR USERINUSE");
                                 } else {
-                                    username = tentativoUser;
+                                    username = tentativo;
                                     usernamesConnessi.add(username);
-                                    loggedIn = true;
                                     out.println("OK");
                                 }
                             }
-                        } else if (comando.equals("QUIT")) {
+                        } else if (linea.equals("QUIT")) {
                             out.println("BYE");
                             break;
                         } else {
                             out.println("ERR LOGINREQUIRED");
                         }
-                        continue;
-                    }
-
-                    switch (comando) {
-                        case "N":
+                    } else {
+                        if (linea.equals("N")) {
                             synchronized (disponibilita) {
-                                out.println("AVAIL Gold:" + disponibilita.get("Gold") + 
-                                                  " Pit:" + disponibilita.get("Pit") + 
-                                                  " Parterre:" + disponibilita.get("Parterre"));
+                                out.println("AVAIL Gold:" + disponibilita.get("Gold") + " Pit:" + disponibilita.get("Pit") + " Parterre:" + disponibilita.get("Parterre"));
                             }
-                            break;
-
-                        case "BUY":
-                            String rigaAcquisto = in.readLine();
-                            if (rigaAcquisto == null) break;
-                            rigaAcquisto = rigaAcquisto.trim();
-                            
-                            String[] datiAcquisto = rigaAcquisto.split(" ");
-                            if (datiAcquisto.length < 2) {
-                                out.println("ERR SYNTAX");
-                                break;
-                            }
-
-                            String tipo = datiAcquisto[0];
-                            int quantita;
-                            try {
-                                quantita = Integer.parseInt(datiAcquisto[1]);
-                            } catch (NumberFormatException e) {
-                                out.println("ERR SYNTAX");
-                                break;
-                            }
+                        } else if (linea.equals("BUY")) {
+                            String rigaDati = in.readLine().trim();
+                            String[] parti = rigaDati.split(" ");
+                            String tipo = parti[0];
+                            int qta = Integer.parseInt(parti[1]);
 
                             synchronized (disponibilita) {
-                                if (!disponibilita.containsKey(tipo)) {
-                                    out.println("ERR UNKNOWNTYPE");
+                                if (disponibilita.containsKey(tipo) && disponibilita.get(tipo) >= qta) {
+                                    disponibilita.put(tipo, disponibilita.get(tipo) - qta);
+                                    out.println("OK");
                                 } else {
-                                    int disp = disponibilita.get(tipo);
-                                    if (quantita > 0 && disp >= quantita) {
-                                        disponibilita.put(tipo, disp - quantita);
-                                        out.println("OK");
-                                    } else {
-                                        out.println("KO");
-                                    }
+                                    out.println("KO");
                                 }
                             }
-                            break;
-
-                        case "QUIT":
+                        } else if (linea.equals("QUIT")) {
                             out.println("BYE");
-                            socket.close();
-                            return;
-
-                        default:
-                            out.println("ERR UNKNOWNCMD");
                             break;
+                        } else {
+                            out.println("ERR UNKNOWNCMD");
+                        }
                     }
                 }
-            } catch (IOException e) {
-                System.out.println("Connessione interrotta con il client.");
-            } finally {
+
                 if (username != null) {
                     synchronized (usernamesConnessi) {
                         usernamesConnessi.remove(username);
                     }
                 }
-                try {
-                    socket.close();
-                } catch (IOException ignored) {}
+                socket.close();
+
+            } catch (Exception e) {
+                System.out.println("Client disconnesso.");
             }
         }
     }
